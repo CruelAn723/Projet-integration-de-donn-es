@@ -1,5 +1,6 @@
 import requests
 import mysql.connector
+from concurrent.futures import ThreadPoolExecutor
 
 # Connection à la base de données
 conn = mysql.connector.connect(
@@ -10,38 +11,66 @@ conn = mysql.connector.connect(
 )
 cursor = conn.cursor()
 
-# On selecctionne les ligne dont la population est nulle 
+batch_size = 50  # Number of code_INSEEs to fetch in each batch
+
+# On selecctionne les lignes dont la population est nulle 
 cursor.execute("SELECT Code_commune_INSEE FROM communes WHERE Population IS NULL")
 rows = cursor.fetchall()
 
-# On initialise les Partie de l'URL debut et 
+# On initialise les Parties de l'URL debut et fin 
 baseURL = "https://geo.api.gouv.fr/communes/"
 endURL = "?fields=population&format=json"
 
-# On parcours chaque ligne en recuperant le code INSEE 
-for row in rows:
-    code_INSEE = str(row[0]).zfill(5)  # On comble de Zero si neccessaire 
-    api_url = f"{baseURL}{code_INSEE}{endURL}"
+# Initialise des listes vides pour stocker les reponses d'api et les données populations
+api_responses = []
+population_data = []
 
-    # On construit la requette API
-    response = requests.get(api_url)
-    
-    # On Affiche la reponse pour avoir de la visibilité
-    print(f"API Response for {code_INSEE}: {response.text}")
+# on divise les lignes en batch et On construits les requetes vers l'api
+for i in range(0, len(rows), batch_size):
+    current_batch = rows[i:i + batch_size]
 
-    data = response.json()
+    # on construit les URLs de requetes avec les code_INSEE
+    api_urls = [f"{baseURL}{str(row[0]).zfill(5)}{endURL}" for row in current_batch]
 
-    # On Affiche le contenu de la reponse
-    print(f"Retrieved Data for {code_INSEE}: {data}")
+    print(f"\nProcessing batch {i//batch_size + 1}...")
+    print("API URLs:", api_urls)
 
-    # On recupere les données de population
-    population = data.get('population', None)
+    # On envoie des requettes d'Api en parralle grace à ThreadPoolExecutor
+    try:
+        with ThreadPoolExecutor() as executor:
+            responses = list(executor.map(requests.get, api_urls))
+    except Exception as e:
+        print(f"Error in API request: {e}")
+        # on Log les erreurs et les  exceptions
 
-    # On mets a jour les inforation de opulation dans la base de données
-    cursor.execute("UPDATE communes SET Population = %s WHERE Code_commune_INSEE = %s", (population, code_INSEE))
+    # On extrait les données de population de la reponse de l'API
+    for j, response in enumerate(responses):
+        api_responses.append(response)
 
-# On commit
+        try:
+            data = response.json()
+            population = data.get('population', None)
+            population_data.append(population)
+            print(f"Population for {current_batch[j][0]}: {population}")
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            # on Log les données et les erreurs si necessaire 
+
+# On mets a jour la base de données 
+for i, row in enumerate(current_batch):
+    code_INSEE = str(row[0]).zfill(5)
+    population = population_data[i]
+
+    try:
+        cursor.execute("UPDATE communes SET Population = %s WHERE Code_commune_INSEE = %s", (population, code_INSEE))
+        print(f"Updated population for {code_INSEE}: {population}")
+    except Exception as e:
+        print(f"Error updating database: {e}")
+        # on Log les données et les erreurs si necessaire 
+
+
+# on Commit les modifications
 conn.commit()
 
-# On ferme la connection a la base de données
+# on ferme la connection
 conn.close()
