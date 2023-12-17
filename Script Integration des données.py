@@ -1,17 +1,25 @@
 import requests
 import mysql.connector
 from concurrent.futures import ThreadPoolExecutor
+import configparser
+
+
+config = configparser.ConfigParser()
+config.read('C:\\Users\\Aorus 2022\\Desktop\\script TD Qualié de données\\Config..ini')
+
+db_config = config['database']
 
 # Connection à la base de données
 conn = mysql.connector.connect(
-    host='localhost',
-    user='root',
-    password='123123123',
-    database='commune_de_france'
+    host=db_config['host'],
+    user=db_config['user'],
+    password=db_config['password'],
+    database=db_config['database']
 )
+
 cursor = conn.cursor()
 
-batch_size = 95  # Nombre de code INSEE a recuperer pour chaque batch
+batch_size = 95  # Number of code_INSEEs to fetch in each batch
 
 # On sélectionne les lignes dont la population est nulle 
 cursor.execute("SELECT Code_commune_INSEE FROM communes WHERE Population IS NULL")
@@ -30,7 +38,7 @@ for i in range(0, len(rows), batch_size):
     current_batch = rows[i:i + batch_size]
 
     if not current_batch:
-        continue  # on ignore les batch vides
+        continue  # Skip empty batches
 
     # On construit les URLs de requêtes avec les code_INSEE
     api_urls = [f"{baseURL}{str(row[0]).zfill(5)}{endURL}" for row in current_batch]
@@ -45,7 +53,7 @@ for i in range(0, len(rows), batch_size):
     except Exception as e:
         print(f"Error in API request: {e}")
         # On log les erreurs et les exceptions
-        continue  # En cas d'erreur sur le batch on igonre et on passe au suivant
+        continue  # Skip the rest of the processing for this batch if there's an error
 
     # On extrait les données de population de la réponse de l'API
     for j, response in enumerate(responses):
@@ -59,16 +67,16 @@ for i in range(0, len(rows), batch_size):
         except Exception as e:
             print(f"Error parsing response: {e}")
             # On log les données et les erreurs si nécessaire 
-            continue  # On ignore le reste du traitement en cas d'erreur
+            continue  # Skip the rest of the processing for this item if there's an error
 
         # On met à jour la base de données pour chaque ligne
         code_INSEE = str(current_batch[j][0]).zfill(5)
         try:
-            cursor.execute("UPDATE communes SET Population = %s WHERE Code_commune_INSEE = %s", (population, code_INSEE))
+            update_query = "UPDATE communes SET Population = %s WHERE Code_commune_INSEE = %s"
+            cursor.execute(update_query, (population, code_INSEE))
             print(f"Updated population for {code_INSEE}: {population}")
-        except Exception as e:
+        except mysql.connector.Error as e:
             print(f"Error updating database: {e}")
-            # On log les données et les erreurs si nécessaire 
 
     # On commit les modifications après le traitement de chaque lot
     conn.commit()
