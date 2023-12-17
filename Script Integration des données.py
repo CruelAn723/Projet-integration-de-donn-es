@@ -5,7 +5,7 @@ import configparser
 
 
 config = configparser.ConfigParser()
-config.read('C:\\Users\\Aorus 2022\\Desktop\\script TD Qualié de données\\Config..ini')
+config.read('Config.ini')
 
 db_config = config['database']
 
