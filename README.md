@@ -1,3 +1,7 @@
+Description : ce script permet d'intégrer les données des communes de France issues du site de L'INSEE à une base de données SQL.
+
+
+
 Pour utiliser le programme :
 
 1. Téléchargez le projet.
